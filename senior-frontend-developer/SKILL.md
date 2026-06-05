@@ -26,19 +26,49 @@ it.
 This skill is the entry point. Read this whole file, then load the one
 `references/` file that matches the task before writing code.
 
-## Default stack assumptions
+## Stack (MyPertamina web apps)
 
-Unless the repository says otherwise, assume:
+These are the conventions across the `myptm-*-web` / `myptm-web-*` frontends
+(e.g. `myptm-web-mobile`, `myptm-web-spklu`, `myptm-loyalty-web`):
 
-- **Next.js (App Router)** with React Server Components by default
-- **React 18/19** + **TypeScript** in `strict` mode
-- **Styling**: Tailwind CSS (often with a `shadcn/ui`-style layer) **or** Material
-  UI (MUI) — detect which the repo uses; they have very different idioms
-- **TanStack Query** for client-side server-state, **Zod** for validation
-- **Vitest** + **Testing Library** for unit/component tests, **Playwright** for e2e
+- **Next.js (App Router)** — Next 14/15, **React 18/19**, **TypeScript** in `strict`
+  mode. These are **client-heavy feature apps**: route shells under `app/`, but most
+  UI is `"use client"`. Use Server Components where they genuinely fit; don't force a
+  server-first rewrite onto a client-rendered feature.
+- **Styling — detect per repo** (they differ a lot):
+  - **MUI v5/v6 + `@emotion/react`** — `myptm-web-mobile`, `myptm-loyalty-web`
+  - **Tailwind CSS v3** — `myptm-web-spklu`
+- **Server state**: **TanStack Query v5** (universal). **Client state**: **Zustand**
+  (universal), plus **Jotai** atoms in some repos (e.g. spklu `atoms/`). **No Redux.**
+- **HTTP**: **axios**. **Forms/validation**: **react-hook-form** + **Zod**.
+- **Tests**: **Jest** + **@testing-library/react** (timezone pinned to Asia/Jakarta in
+  some repos). **Not Vitest, not Playwright.**
+- **Tooling**: ESLint 9, Prettier, Husky, `next lint`. i18n via per-feature `locales/`.
 
-These are defaults, not commandments. **The repo's existing conventions always
-win** over these defaults — see "Step 1" below.
+These are the house defaults. **The specific repo's existing conventions always win**
+— see "Step 1" below.
+
+## House architecture (feature-based)
+
+Most of these apps follow a feature-sliced layout, and some scaffold it with
+generators (`npm run generate:component|domain|feature|service|store|useCase`). Match
+it; use the generator when present instead of hand-rolling structure:
+
+```
+src/
+  app/                     # Next App Router routes (thin shells)
+  components/<Name>/        # shared UI primitives (PascalCase folder per component)
+  features/<Feature>/       # a feature slice:
+    components/  sections/  hooks/  locales/  lib/  __tests__/
+  domains/                 # domain models/logic
+  services/                # API clients (axios)
+  query/                   # TanStack Query hooks
+  stores/  atoms/          # Zustand stores / Jotai atoms
+  hooks/  utils/  types/  constants/  contexts/
+```
+
+Compose features from shared `components/`; keep feature code inside its slice;
+co-locate tests in `__tests__/` and translations in `locales/`.
 
 ## The non-negotiables (apply to every task)
 
@@ -53,10 +83,9 @@ A senior never ships UI that violates these, regardless of how small the task is
    can't do the job.
 3. **Resilient states** — Every async surface handles **loading, error, and empty**
    states, not just the happy path.
-4. **Performance** — Keep client JS minimal (Server Components by default; `"use
-   client"` only when you need interactivity/browser APIs). Avoid layout shift.
-   Optimize images (`next/image`). Don't fetch in waterfalls. Memoize only where it
-   measurably helps.
+4. **Performance** — Keep client JS reasonable. Fetch server-state through TanStack
+   Query (don't refetch in `useEffect`). Avoid layout shift. Optimize images
+   (`next/image`). Code-split heavy features. Memoize only where it measurably helps.
 5. **No regressions in DX** — Lint and type-check pass. No new console errors or
    warnings. No dead code, no leftover `console.log`, no commented-out blocks.
 
@@ -98,10 +127,12 @@ both `figma-to-code.md` and `nextjs-react.md`, plus the styling reference for th
 repo's system — `tailwind.md` or `mui.md`).
 
 ### Step 4 — Implement
-- Compose from existing primitives; create new ones only when reuse demands it.
-- Server Component by default; reach for `"use client"` only at the leaf that needs
-  interactivity, and keep the client boundary as small as possible.
-- Co-locate: component + its types + its tests + its styles live together.
+- Compose from existing `components/` primitives; create new ones only when reuse
+  demands it. Use the repo's generators (`generate:feature|component|service|...`)
+  where present.
+- Keep feature code inside its `features/<Feature>/` slice; fetch server-state via
+  TanStack Query hooks (`query/`), client-state via Zustand/Jotai.
+- Co-locate: component + its types + its `__tests__` + its `locales` live together.
 - Small, focused commits/edits with clear intent.
 
 ### Step 5 — Verify (Definition of Done)
@@ -113,20 +144,21 @@ Before declaring the task complete, confirm **all** of these:
 - [ ] Loading, error, and empty states handled
 - [ ] Responsive (mobile → desktop); no horizontal scroll; no layout shift
 - [ ] No console errors/warnings; no leftover debug code
-- [ ] Tests added/updated for new logic and components (per repo norms)
-- [ ] Matches the repo's existing patterns and naming
+- [ ] Jest + Testing Library tests added/updated for new logic and components
+- [ ] Matches the repo's existing patterns and naming (feature slice, generators)
 
-Run the repo's own verification (e.g. `pnpm typecheck && pnpm lint && pnpm test`)
-when available and report the result rather than assuming it passes.
+Run the repo's own verification (e.g. `npm run lint && npm test`, plus `tsc`) when
+available and report the result rather than assuming it passes.
 
 ## Anti-patterns — never do these
 
-- Slapping `"use client"` on a whole page/tree to make one button work.
-- Reinventing components/utilities that already exist in the repo.
-- `useEffect` for fetching data that should be fetched server-side (or with TanStack Query).
+- Reinventing components/utilities that already exist in `components/` or the repo.
+- `useEffect` + axios for server-state that belongs in a TanStack Query hook.
+- Reaching for Redux — this stack uses Zustand + Jotai; don't introduce new state libs.
 - `<div onClick>` where a `<button>` belongs; `key={index}` in dynamic lists.
-- Hardcoding colors/spacing instead of using the design tokens/theme.
-- Storing server data in `useState` instead of a query cache; deriving state you could compute.
+- Hardcoding colors/spacing instead of using the MUI theme / Tailwind tokens.
+- Storing server data in `useState` instead of the query cache; deriving state you could compute.
+- Spilling feature code outside its `features/<Feature>/` slice; bypassing the generators.
 - Shipping the happy path only. Ignoring the keyboard. Ignoring the slow network.
 
 ## Communicating your work
