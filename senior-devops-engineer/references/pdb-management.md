@@ -88,6 +88,26 @@ When the deployments live in a Git repo of manifests (GitOps), source the select
 Sourcing the selector from the real manifest (not `app: <name>`) is what makes the PDB
 correct — read it, never assume.
 
+## Pre-implementation verification via Datadog (when a Datadog MCP is connected)
+
+Before generating/committing PDBs, cross-check each service in Datadog — a PDB is only safe
+and useful if the service is actually running with enough replicas:
+
+- **Live & monitored?** Confirm the service exists in Datadog (service catalog / emitting
+  metrics or pods). A name in the list that Datadog doesn't know may be dead/renamed → FLAG,
+  don't silently create a PDB for a ghost.
+- **≥ 2 ready replicas?** A PDB with `maxUnavailable: 1` on a service with only **1** replica
+  yields `ALLOWED DISRUPTIONS = 0` → it will **block** the node drain. For any service with
+  < 2 ready pods, FLAG it (raise replicas before the window, or exclude it) — report it
+  clearly rather than shipping a PDB that deadlocks the upgrade.
+- **Health/traffic sanity:** a quick error-rate/throughput look distinguishes real
+  high-traffic services from idle ones (informs priority, not whether to make the PDB).
+
+Summarize the Datadog check per service (live? / #ready replicas / healthy? / note) and put
+it in the PR description. This verification does not change the PDB content (still
+`maxUnavailable: 1` + real selector) — it catches services where a PDB would be wrong or
+counterproductive.
+
 ## Verify (acceptance)
 
 - Every PDB applied; `ALLOWED DISRUPTIONS` column is **≥ 1**.
